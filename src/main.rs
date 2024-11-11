@@ -3,6 +3,8 @@ use std::{default, fmt::Error, fs::{self, read, File}, io::{BufRead, Read, Seek}
 use bzip2::bufread;
 use std::io::BufReader;
 
+const MESSAGE_RECORD_SIZE: usize = 2432; // number of bytes in a message segment
+
 #[derive(Default, Debug)]
 struct VolumeHeaderRaw{
     volumename:[u8; 12], 
@@ -22,6 +24,7 @@ impl VolumeHeaderRaw{
     }
 }
 
+#[derive(Debug)]
 struct VolumeHeader{
     volumename: String,
     date: i32,
@@ -43,44 +46,40 @@ impl TryFrom<VolumeHeaderRaw> for VolumeHeader {
     }
 }
 
-fn main() {
-    let file = fs::File::open("./data/test").unwrap();
-    let mut reader = BufReader::new(file);
-    let mut buf = [0_u8; 12];
-    let mut dttest = [0_u8; 4];
-    let mut timetest = [0_u8; 4];
-    let mut icaobytes = [0_u8; 4];
-    let mut control_word = [0_u8; 4];
+fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    // the reader automatically advances
-    reader.read_exact(&mut buf);
-    reader.read_exact(&mut dttest);
-    reader.read_exact(&mut timetest);
-    reader.read_exact(&mut icaobytes);
-    reader.read_exact(&mut control_word);
+    let fp = String::from("./data/test");
+    let vh_read_res = read_volume_header(fp).unwrap();
+    println!("{:?}", vh_read_res);
 
+    let ff = File::open("./data/test").unwrap();
+    let mut reader = BufReader::new(ff);
+    let mut cw = [0_u8; 4];
+    let mut encoding = [0_u8; 3];
+    let _ = reader.seek(std::io::SeekFrom::Start(24))?;
+    reader.read_exact(&mut cw)?;
+    reader.read_exact(&mut encoding)?;
+    reader.seek(std::io::SeekFrom::Current(-3))?;
 
-    let teststr = String::from_utf8_lossy(&buf);
-    let tint = i32::from_be_bytes(dttest);
-    let ttest = i32::from_be_bytes(timetest);
-    let icao = String::from_utf8_lossy(&icaobytes);
-    let ctrlwrd = i32::from_be_bytes(control_word);
-    println!("{}",buf.len());
+    let mut decoder = bzip2::bufread::BzDecoder::new(reader);
 
-    println!("{:?}", teststr);
-    println!("{:?}", tint);
-    println!("{:?}", ttest);
-    println!("{:?}", icao);
-    println!("{:?}", ctrlwrd);
+    let control_word = i32::from_be_bytes(cw);
+    let enc = String::from_utf8_lossy(&encoding);
 
-    // let ff = File::open("./data/test").unwrap();
-    // let mut br = BufReader::new(ff);
+    let t = usize::try_from(control_word).unwrap();
 
-    // let mut dc = bzip2::read::BzDecoder::new(br);
+    let mut clutter_map_data = [0_u8; 2269];
 
-    // let mut output = String::new();
+    
+    let _ = decoder.read_exact(&mut clutter_map_data)?;
 
-    // dc.read_to_string(& mut output).unwrap();
+    println!("Size: {}", control_word);
+    println!("");
+    println!("Encoding: {}", enc);
+
+    println!("{}",String::from_utf8_lossy(&clutter_map_data));
+
+    Ok(())
 
 }
 
