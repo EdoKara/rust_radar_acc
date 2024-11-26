@@ -24,6 +24,45 @@ impl VolumeHeaderRaw{
     }
 }
 
+struct MessageHeaderRaw{
+    messagesize:[u8; 2],
+    rda_redundant_channel: [u8;1],
+    message_type: [u8;1],
+    id_seq_no: [u8;2],
+    julian_date: [u8;2], // julian date - 2440586.5
+    ms_from_midnight: [u8;4],
+    n_segments: [u8;2],
+    message_segment_no: [u8;2]
+}
+
+struct MessageHeader{
+    messagesize: i16,
+    rda_redundant_channel: i8,
+    message_type: i8,
+    id_seq_no: i16,
+    julian_date: i16,
+    ms_from_midnight: i32,
+    n_segments: i16,
+    message_segment_no: i16
+}
+
+impl TryFrom<MessageHeaderRaw> for MessageHeader{
+    type Error = Box<dyn std::error::Error>;
+
+    fn try_from(value: MessageHeaderRaw) -> Result<Self, Self::Error>{
+        Ok(MessageHeader{
+        messagesize: i16::from_be_bytes(value.messagesize),
+        rda_redundant_channel: i8::from_be_bytes(value.rda_redundant_channel),
+        message_type: i8::from_be_bytes(value.message_type),
+        id_seq_no: i16::from_be_bytes(value.id_seq_no),
+        julian_date: i16::from_be_bytes(value.julian_date),
+        ms_from_midnight: i32::from_be_bytes(value.ms_from_midnight),
+        n_segments: i16::from_be_bytes(value.n_segments),
+        message_segment_no: i16::from_be_bytes(value.message_segment_no)
+        })
+    }
+}
+
 #[derive(Debug)]
 struct VolumeHeader{
     volumename: String,
@@ -61,23 +100,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     reader.read_exact(&mut encoding)?;
     reader.seek(std::io::SeekFrom::Current(-3))?;
 
-    let mut decoder = bzip2::bufread::BzDecoder::new(reader);
-
     let control_word = i32::from_be_bytes(cw);
     let enc = String::from_utf8_lossy(&encoding);
+    let t = u64::try_from(control_word).unwrap();
 
-    let t = usize::try_from(control_word).unwrap();
+    let mut decoder = bzip2::bufread::BzDecoder::new(reader.take(t));
 
-    let mut clutter_map_data = [0_u8; 2269];
 
-    
-    let _ = decoder.read_exact(&mut clutter_map_data)?;
+
+    let mut metadata_record_entry = Vec::new();
+    let _ = decoder.read_to_end(&mut metadata_record_entry);
+
+    // let _ = decoder.read_vectored(&mut metadata_record_entry);
 
     println!("Size: {}", control_word);
     println!("");
     println!("Encoding: {}", enc);
+    
+    // println!("{:?}",String::from_utf8_lossy(metadata_record_entry.as_slice()));
+    println!("{:?} Bytes", metadata_record_entry.len());
 
-    println!("{}",String::from_utf8_lossy(&clutter_map_data));
+    let mut header: [u8; 96] = [0;96];
+    header.copy_from_slice(&metadata_record_entry[0..96]);
+    let mut msgtype: [u8; 2] = [0;2];
+    msgtype.copy_from_slice(&header[12..14]);
+    let mgtyp = i16::from_be_bytes(msgtype);
+
+    println!("{:?}",header);
+    println!("{:?}",mgtyp);
+
 
     Ok(())
 
