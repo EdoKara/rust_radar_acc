@@ -3,87 +3,11 @@ use std::{default, fmt::Error, fs::{self, read, File}, io::{BufRead, Read, Seek}
 use bzip2::bufread;
 use std::io::BufReader;
 
-const MESSAGE_RECORD_SIZE: usize = 2432; // number of bytes in a message segment
+pub mod messages;
+use crate::messages::{VolumeHeader, VolumeHeaderRaw, MessageHeader, MessageHeaderRaw};
 
-#[derive(Default, Debug)]
-struct VolumeHeaderRaw{
-    volumename:[u8; 12], 
-    date:[u8; 4], 
-    time:[u8; 4], 
-    icao:[u8; 4], 
-}
-
-impl VolumeHeaderRaw{
-    fn new() -> VolumeHeaderRaw{
-        VolumeHeaderRaw{
-            volumename:[0_u8; 12],
-            date: [0_u8; 4],
-            time: [0_u8; 4], 
-            icao: [0_u8; 4]
-        }
-    }
-}
-
-struct MessageHeaderRaw{
-    messagesize:[u8; 2],
-    rda_redundant_channel: [u8;1],
-    message_type: [u8;1],
-    id_seq_no: [u8;2],
-    julian_date: [u8;2], // julian date - 2440586.5
-    ms_from_midnight: [u8;4],
-    n_segments: [u8;2],
-    message_segment_no: [u8;2]
-}
-
-struct MessageHeader{
-    messagesize: i16,
-    rda_redundant_channel: i8,
-    message_type: i8,
-    id_seq_no: i16,
-    julian_date: i16,
-    ms_from_midnight: i32,
-    n_segments: i16,
-    message_segment_no: i16
-}
-
-impl TryFrom<MessageHeaderRaw> for MessageHeader{
-    type Error = Box<dyn std::error::Error>;
-
-    fn try_from(value: MessageHeaderRaw) -> Result<Self, Self::Error>{
-        Ok(MessageHeader{
-        messagesize: i16::from_be_bytes(value.messagesize),
-        rda_redundant_channel: i8::from_be_bytes(value.rda_redundant_channel),
-        message_type: i8::from_be_bytes(value.message_type),
-        id_seq_no: i16::from_be_bytes(value.id_seq_no),
-        julian_date: i16::from_be_bytes(value.julian_date),
-        ms_from_midnight: i32::from_be_bytes(value.ms_from_midnight),
-        n_segments: i16::from_be_bytes(value.n_segments),
-        message_segment_no: i16::from_be_bytes(value.message_segment_no)
-        })
-    }
-}
-
-#[derive(Debug)]
-struct VolumeHeader{
-    volumename: String,
-    date: i32,
-    time: i32,
-    icao: String
-}
-
-impl TryFrom<VolumeHeaderRaw> for VolumeHeader {
-    type Error = Box<dyn std::error::Error>;
-
-    fn try_from(value: VolumeHeaderRaw) -> Result<Self, Self::Error> {
-        Ok(VolumeHeader{
-            volumename: str::from_utf8(&value.volumename)?.to_string(),
-            date: i32::from_be_bytes(value.date),
-            time: i32::from_be_bytes(value.time),
-            icao: str::from_utf8(&value.icao)?.to_string()
-        }
-        )
-    }
-}
+const MESSAGE_RECORD_SIZE: usize = 2432; // number of bytes in a message segment (compressed)
+const MESSAGE_HEADER_STARTING_BYTE_OFFSET: usize = 12;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 
@@ -93,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let ff = File::open("./data/test").unwrap();
     let mut reader = BufReader::new(ff);
-    let mut cw = [0_u8; 4];
+    let mut cw = [0_0_u8; 4];
     let mut encoding = [0_u8; 3];
     let _ = reader.seek(std::io::SeekFrom::Start(24))?;
     reader.read_exact(&mut cw)?;
@@ -105,9 +29,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let t = u64::try_from(control_word).unwrap();
 
     let mut decoder = bzip2::bufread::BzDecoder::new(reader.take(t));
-
-
-
     let mut metadata_record_entry = Vec::new();
     let _ = decoder.read_to_end(&mut metadata_record_entry);
 
@@ -122,12 +43,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut header: [u8; 96] = [0;96];
     header.copy_from_slice(&metadata_record_entry[0..96]);
-    let mut msgtype: [u8; 2] = [0;2];
-    msgtype.copy_from_slice(&header[12..14]);
-    let mgtyp = i16::from_be_bytes(msgtype);
-
     println!("{:?}",header);
-    println!("{:?}",mgtyp);
+    println!("{:?}", &header[12..14]);
+    println!("{:?}", header.get(14));
+    println!("{:?}", header.get(15));
+    println!("{:?}", &header[16..18]);
+    println!("{:?}", &header[18..20]);
+    println!("{:?}", &header[20..24]);
+    println!("{:?}", &header[24..26]);
+    println!("{:?}", &header[26..28]);
+
+    let mut mhdr = messages::MessageHeaderRaw::new();
+    mhdr.messagesize.copy_from_slice(&header[12..14]);
+    mhdr.rda_redundant_channel = header.get(14).unwrap().clone();
+    mhdr.message_type = header.get(15).unwrap().clone();
+    mhdr.id_seq_no.copy_from_slice(&header[16..18]);
+    mhdr.julian_date.copy_from_slice(&header[18..20]);
+    mhdr.ms_from_midnight.copy_from_slice(&header[20..24]);
+    mhdr.n_segments.copy_from_slice(&header[24..26]);
+    mhdr.message_segment_no.copy_from_slice(&header[26..28]);
+    
+    let mhdr_proc = MessageHeader::try_from(mhdr).unwrap();
+
+    
+    println!("{:?}",header);
+    println!("{:?}", mhdr_proc);
 
 
     Ok(())
