@@ -1,5 +1,7 @@
 // EACH WORD IS 4 BYTES; a halfword is 2 bytes.
 
+pub const HALFWORD_SIZE: usize = 2;
+
 use std::{collections::btree_map::Range, io::Error};
 
 #[derive(Default, Debug)]
@@ -156,6 +158,7 @@ impl TryFrom<VolumeHeaderRaw> for VolumeHeader {
     }
 }
 
+#[derive(Debug)]
 pub struct RawClutterFilterMapMetadata {
     pub map_generation_date: [u8; 2],
     pub map_generation_time: [u8; 2],
@@ -164,7 +167,7 @@ pub struct RawClutterFilterMapMetadata {
 }
 
 impl RawClutterFilterMapMetadata {
-    pub fn new(&self) -> RawClutterFilterMapMetadata {
+    pub fn new() -> RawClutterFilterMapMetadata {
         RawClutterFilterMapMetadata{
         map_generation_date: [0_u8; 2],
         map_generation_time: [0_u8; 2],
