@@ -26,8 +26,8 @@ impl VolumeHeaderRaw {
 #[derive(Default, Debug)]
 pub struct MessageHeaderRaw {
     pub messagesize: [u8; 2],
-    pub rda_redundant_channel: u8,
-    pub message_type: u8,
+    pub rda_redundant_channel: [u8; 1],
+    pub message_type: [u8; 1],
     pub id_seq_no: [u8; 2],
     pub julian_date: [u8; 2], // julian date - 2440586.5
     pub ms_from_midnight: [u8; 4],
@@ -39,8 +39,8 @@ impl MessageHeaderRaw {
     pub fn new() -> MessageHeaderRaw {
         MessageHeaderRaw {
             messagesize: [0_u8; 2],
-            rda_redundant_channel: 0_u8,
-            message_type: 0_u8,
+            rda_redundant_channel: [0_u8],
+            message_type: [0_u8],
             id_seq_no: [0_u8; 2],
             julian_date: [0_u8; 2], // julian date - 2440586.5
             ms_from_midnight: [0_u8; 4],
@@ -68,8 +68,8 @@ impl TryFrom<MessageHeaderRaw> for MessageHeader {
     fn try_from(value: MessageHeaderRaw) -> Result<Self, Self::Error> {
         Ok(MessageHeader {
             messagesize: i16::from_be_bytes(value.messagesize),
-            rda_redundant_channel: value.rda_redundant_channel as i8,
-            message_type: collate_message_type(value.message_type as i8).unwrap(),
+            rda_redundant_channel: i8::from_be_bytes(value.rda_redundant_channel),
+            message_type: collate_message_type(i8::from_be_bytes(value.message_type)).unwrap(),
             id_seq_no: i16::from_be_bytes(value.id_seq_no),
             julian_date: i16::from_be_bytes(value.julian_date),
             ms_from_midnight: i32::from_be_bytes(value.ms_from_midnight),
@@ -168,11 +168,11 @@ pub struct RawClutterFilterMapMetadata {
 
 impl RawClutterFilterMapMetadata {
     pub fn new() -> RawClutterFilterMapMetadata {
-        RawClutterFilterMapMetadata{
-        map_generation_date: [0_u8; 2],
-        map_generation_time: [0_u8; 2],
-        num_elevation_segments: [0_u8; 2],
-        elevation_segments: vec![RawElevationSegment::new(); 5]
+        RawClutterFilterMapMetadata {
+            map_generation_date: [0_u8; 2],
+            map_generation_time: [0_u8; 2],
+            num_elevation_segments: [0_u8; 2],
+            elevation_segments: vec![RawElevationSegment::new(); 5],
         }
     }
 }
@@ -184,7 +184,6 @@ pub struct ClutterFilterMapMetadata {
     pub elevation_segments: Vec<ElevationSegment>,
 }
 
-
 pub struct ElevationSegment {
     pub azimuth_segments: Vec<AzimuthSegment>,
 }
@@ -195,27 +194,24 @@ impl TryFrom<RawElevationSegment> for ElevationSegment {
     fn try_from(value: RawElevationSegment) -> Result<Self, Self::Error> {
         //let mut convs: Vec<Result<AzimuthSegment, Box<dyn std::error::Error>>> = Vec::new();
         let mut convs: Vec<AzimuthSegment> = Vec::new();
-        for aseg in value.azimuth_segments.iter(){
-            convs.push(
-                AzimuthSegment::try_from(aseg.clone()).unwrap()
-            );
+        for aseg in value.azimuth_segments.iter() {
+            convs.push(AzimuthSegment::try_from(aseg.clone()).unwrap());
         }
         Ok(ElevationSegment {
-            azimuth_segments: convs
+            azimuth_segments: convs,
         })
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct RawElevationSegment {
     pub azimuth_segments: Vec<RawAzimuthSegment>,
 }
 
-impl RawElevationSegment{
-    pub fn new() -> RawElevationSegment{
-        RawElevationSegment{
-            azimuth_segments: vec![RawAzimuthSegment::new(); 360]
+impl RawElevationSegment {
+    pub fn new() -> RawElevationSegment {
+        RawElevationSegment {
+            azimuth_segments: vec![RawAzimuthSegment::new(); 360],
         }
     }
 }
@@ -228,9 +224,9 @@ pub struct RawAzimuthSegment {
 
 impl RawAzimuthSegment {
     pub fn new() -> RawAzimuthSegment {
-        RawAzimuthSegment{
+        RawAzimuthSegment {
             num_rangezones: [0; 2],
-            range_zones: Vec::new()
+            range_zones: Vec::new(),
         }
     }
 }
