@@ -10,8 +10,10 @@ use std::{
 };
 
 use crate::messages::{
-    ClutterFilterMapMetadata, MessageHeader, MessageHeaderRaw, RawClutterFilterMapMetadata,
-    VolumeHeader, VolumeHeaderRaw,
+    ClutterFilterMapMetadata, DigitalRadarDataGenericFormatHeader,
+    DigitalRadarDataGenericFormatHeaderRaw, MessageHeader, MessageHeaderRaw,
+    RawClutterFilterMapMetadata, VolumeHeader, VolumeHeaderRaw,
+    DIGITAL_RADAR_DATA_GENERIC_FORMAT_HEADER_SIZE,
 };
 
 const MESSAGE_RECORD_SIZE: usize = 2432; // number of bytes in a message segment (compressed)
@@ -35,6 +37,7 @@ pub fn segment_message<'a>(ff: File) -> anyhow::Result<Vec<BufReader<&'a std::fs
 
     let mut readers: Vec<bzip2::read::BzDecoder<std::io::Take<&std::fs::File>>> = Vec::new();
 
+    //skips the volume header
     fileref.seek(SeekFrom::Start(24))?;
     cursor_position += 24;
 
@@ -131,4 +134,48 @@ pub fn decompress_nexrad_file(fp: &str) -> anyhow::Result<Vec<Vec<u8>>> {
     }
 
     Ok(bufs)
+}
+
+pub fn read_data_header(message: &Vec<u8>) -> anyhow::Result<DigitalRadarDataGenericFormatHeader> {
+    let mut dhdr: DigitalRadarDataGenericFormatHeaderRaw =
+        DigitalRadarDataGenericFormatHeaderRaw::default();
+
+    let (_, msg) = message.split_at(MESSAGE_HEADER_STARTING_BYTE_OFFSET + MESSAGE_HEADER_SIZE);
+    let (header, _) = msg.split_at(DIGITAL_RADAR_DATA_GENERIC_FORMAT_HEADER_SIZE);
+    let mut reader = std::io::Cursor::new(header);
+
+    let _ = reader.read_exact(&mut dhdr.radar_identifier);
+    let _ = reader.read_exact(&mut dhdr.collection_time);
+    let _ = reader.read_exact(&mut dhdr.modified_julian_date);
+    let _ = reader.read_exact(&mut dhdr.azimuth_number);
+    let _ = reader.read_exact(&mut dhdr.azimuth_angle);
+    let _ = reader.read_exact(&mut dhdr.compression_indicator);
+    let _ = reader.read_exact(&mut dhdr.spare_byte);
+    let _ = reader.read_exact(&mut dhdr.radial_length);
+    let _ = reader.read_exact(&mut dhdr.az_res_spacing);
+    let _ = reader.read_exact(&mut dhdr.radial_status);
+    let _ = reader.read_exact(&mut dhdr.elevation_number);
+    let _ = reader.read_exact(&mut dhdr.cut_sector_number);
+    let _ = reader.read_exact(&mut dhdr.elevation_angle);
+    let _ = reader.read_exact(&mut dhdr.radial_spot_blanking_status);
+    let _ = reader.read_exact(&mut dhdr.azimuth_indexing_mode);
+    let _ = reader.read_exact(&mut dhdr.data_block_count);
+    let _ = reader.read_exact(&mut dhdr.const_vol_data_block_pointer);
+    let _ = reader.read_exact(&mut dhdr.const_elevation_data_block_pointer);
+    let _ = reader.read_exact(&mut dhdr.const_radial_data_block_pointer);
+    let _ = reader.read_exact(&mut dhdr.reflectivity_block_pointer);
+    let _ = reader.read_exact(&mut dhdr.velocity_block_pointer);
+    let _ = reader.read_exact(&mut dhdr.sw_block_pointer);
+    let _ = reader.read_exact(&mut dhdr.diff_ref_block_pointer);
+    let _ = reader.read_exact(&mut dhdr.phi_block_pointer);
+    let _ = reader.read_exact(&mut dhdr.rho_block_pointer);
+
+    let data_header = DigitalRadarDataGenericFormatHeader::try_from(dhdr).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to convert DigitalRadarDataGenericFormatHeaderRaw: {}",
+            e
+        )
+    })?;
+
+    Ok(data_header)
 }

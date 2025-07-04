@@ -14,15 +14,17 @@ pub mod messages;
 pub mod reader;
 use crate::messages::{
     ClutterFilterMapMetadata, MessageHeader, MessageHeaderRaw, RawClutterFilterMapMetadata,
-    VolumeHeader, VolumeHeaderRaw,
+    VolumeHeader, VolumeHeaderRaw, DIGITAL_RADAR_DATA_GENERIC_FORMAT_HEADER_SIZE,
+    MESSAGE_HEADER_SIZE,
 };
-use crate::reader::{decompress_nexrad_file, read_message_header, read_volume_header};
+use crate::reader::{
+    decompress_nexrad_file, read_data_header, read_message_header, read_volume_header,
+};
 
 const MESSAGE_RECORD_SIZE: usize = 2432; // number of bytes in a message segment (compressed)
 const MESSAGE_HEADER_STARTING_BYTE_OFFSET: usize = 12;
 const CONTROL_WORD_SIZE: usize = 4;
 const VOLUME_HEADER_SIZE: usize = 24;
-
 fn main() -> anyhow::Result<()> {
     let fp = "./data/test";
 
@@ -35,13 +37,18 @@ fn main() -> anyhow::Result<()> {
 
     let mhdrs: Vec<MessageHeader> = segments
         .iter()
-        .map(|seg| read_message_header(seg.to_owned()).unwrap())
+        .map(|seg| read_message_header(seg.clone().to_owned()).unwrap())
         .collect();
 
-    mhdrs.iter().for_each(|mhdr| {
-        println!("Message Header: {:?}", mhdr);
-    });
+    let dhdrs: Vec<_> = segments
+        .iter()
+        .skip(1)
+        .map(|seg| read_data_header(seg).unwrap())
+        .collect();
 
+    println!("{:?}", dhdrs);
+    println!("total data headers: {:?}", dhdrs.len());
+    println!("dh 1: {:?}", dhdrs.get(0).unwrap());
     Ok(())
 }
 

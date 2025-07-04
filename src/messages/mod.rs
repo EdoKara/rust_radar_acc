@@ -1,3 +1,4 @@
+use packed_struct::prelude::*;
 // EACH WORD IS 4 BYTES; a halfword is 2 bytes.
 
 pub const HALFWORD_SIZE: usize = 2;
@@ -35,6 +36,7 @@ pub struct MessageHeaderRaw {
     pub message_segment_no: [u8; 2],
 }
 
+pub const MESSAGE_HEADER_SIZE: usize = 16;
 impl MessageHeaderRaw {
     pub fn new() -> MessageHeaderRaw {
         MessageHeaderRaw {
@@ -305,4 +307,145 @@ impl RangeZone {
             endrange: 0,
         }
     }
+}
+
+#[derive(Debug)]
+pub struct DigitalRadarDataGenericFormatHeader {
+    pub radar_identifier: String,
+    pub collection_time: i32,
+    pub modified_julian_date: i16,
+    pub azimuth_number: i16,
+    pub azimuth_angle: f32,
+    pub compression_indicator: u8,
+    pub spare_byte: u8,
+    pub radial_length: i16,
+    pub az_res_spacing: u8,
+    pub radial_status: u8,
+    pub elevation_number: i8,
+    pub cut_sector_number: i8,
+    pub elevation_angle: f32,
+    pub radial_spot_blanking_status: u8,
+    pub azimuth_indexing_mode: u8,
+    pub data_block_count: i16,
+    pub const_vol_data_block_pointer: i32,
+    pub const_elevation_data_block_pointer: i32,
+    pub const_radial_data_block_pointer: i32,
+    pub reflectivity_block_pointer: i32,
+    pub velocity_block_pointer: i32,
+    pub sw_block_pointer: i32,
+    pub diff_ref_block_pointer: i32,
+    pub phi_block_pointer: i32,
+    pub rho_block_pointer: i32,
+}
+
+pub const DIGITAL_RADAR_DATA_GENERIC_FORMAT_HEADER_SIZE: usize = 68;
+#[derive(Debug)]
+pub struct DigitalRadarDataGenericFormatHeaderRaw {
+    pub radar_identifier: [u8; 4],
+    pub collection_time: [u8; 4],
+    pub modified_julian_date: [u8; 2],
+    pub azimuth_number: [u8; 2],
+    pub azimuth_angle: [u8; 4],
+    pub compression_indicator: [u8; 1],
+    pub spare_byte: [u8; 1],
+    pub radial_length: [u8; 2],
+    pub az_res_spacing: [u8; 1],
+    pub radial_status: [u8; 1],
+    pub elevation_number: [u8; 1],
+    pub cut_sector_number: [u8; 1],
+    pub elevation_angle: [u8; 4],
+    pub radial_spot_blanking_status: [u8; 1],
+    pub azimuth_indexing_mode: [u8; 1],
+    pub data_block_count: [u8; 2],
+    pub const_vol_data_block_pointer: [u8; 4],
+    pub const_elevation_data_block_pointer: [u8; 4],
+    pub const_radial_data_block_pointer: [u8; 4],
+    pub reflectivity_block_pointer: [u8; 4],
+    pub velocity_block_pointer: [u8; 4],
+    pub sw_block_pointer: [u8; 4],
+    pub diff_ref_block_pointer: [u8; 4],
+    pub phi_block_pointer: [u8; 4],
+    pub rho_block_pointer: [u8; 4],
+}
+
+impl From<DigitalRadarDataGenericFormatHeaderRaw> for DigitalRadarDataGenericFormatHeader {
+    fn from(value: DigitalRadarDataGenericFormatHeaderRaw) -> Self {
+        DigitalRadarDataGenericFormatHeader {
+            radar_identifier: std::str::from_utf8(&value.radar_identifier)
+                .unwrap()
+                .to_string(),
+            collection_time: i32::from_be_bytes(value.collection_time),
+            modified_julian_date: i16::from_be_bytes(value.modified_julian_date),
+            azimuth_number: i16::from_be_bytes(value.azimuth_number),
+            azimuth_angle: f32::from_be_bytes(value.azimuth_angle),
+            compression_indicator: value.compression_indicator[0],
+            spare_byte: value.spare_byte[0],
+            radial_length: i16::from_be_bytes(value.radial_length),
+            az_res_spacing: value.az_res_spacing[0],
+            radial_status: value.radial_status[0],
+            elevation_number: value.elevation_number[0] as i8,
+            cut_sector_number: value.cut_sector_number[0] as i8,
+            elevation_angle: f32::from_be_bytes(value.elevation_angle),
+            radial_spot_blanking_status: value.radial_spot_blanking_status[0],
+            azimuth_indexing_mode: value.azimuth_indexing_mode[0],
+            data_block_count: i16::from_be_bytes(value.data_block_count),
+            const_vol_data_block_pointer: i32::from_be_bytes(value.const_vol_data_block_pointer),
+            const_elevation_data_block_pointer: i32::from_be_bytes(
+                value.const_elevation_data_block_pointer,
+            ),
+            const_radial_data_block_pointer: i32::from_be_bytes(
+                value.const_radial_data_block_pointer,
+            ),
+            reflectivity_block_pointer: i32::from_be_bytes(value.reflectivity_block_pointer),
+            velocity_block_pointer: i32::from_be_bytes(value.velocity_block_pointer),
+            sw_block_pointer: i32::from_be_bytes(value.sw_block_pointer),
+            diff_ref_block_pointer: i32::from_be_bytes(value.diff_ref_block_pointer),
+            phi_block_pointer: i32::from_be_bytes(value.phi_block_pointer),
+            rho_block_pointer: i32::from_be_bytes(value.rho_block_pointer),
+        }
+    }
+}
+
+impl DigitalRadarDataGenericFormatHeaderRaw {
+    pub fn new() -> DigitalRadarDataGenericFormatHeaderRaw {
+        DigitalRadarDataGenericFormatHeaderRaw {
+            radar_identifier: [0_u8; 4],
+            collection_time: [0_u8; 4],
+            modified_julian_date: [0_u8; 2],
+            azimuth_number: [0_u8; 2],
+            azimuth_angle: [0_u8; 4],
+            compression_indicator: [0_u8],
+            spare_byte: [0_u8],
+            radial_length: [0_u8; 2],
+            az_res_spacing: [0_u8],
+            radial_status: [0_u8; 1],
+            elevation_number: [0_u8; 1],
+            cut_sector_number: [0_u8; 1],
+            elevation_angle: [0_u8; 4],
+            radial_spot_blanking_status: [0_u8; 1],
+            azimuth_indexing_mode: [0_u8; 1],
+            data_block_count: [0_u8; 2],
+            const_vol_data_block_pointer: [0_u8; 4],
+            const_elevation_data_block_pointer: [0_u8; 4],
+            const_radial_data_block_pointer: [0_u8; 4],
+            reflectivity_block_pointer: [0_u8; 4],
+            velocity_block_pointer: [0_u8; 4],
+            sw_block_pointer: [0_u8; 4],
+            diff_ref_block_pointer: [0_u8; 4],
+            phi_block_pointer: [0_u8; 4],
+            rho_block_pointer: [0_u8; 4],
+        }
+    }
+}
+
+impl Default for DigitalRadarDataGenericFormatHeaderRaw {
+    fn default() -> Self {
+        DigitalRadarDataGenericFormatHeaderRaw::new()
+    }
+}
+
+#[derive(PackedStruct, Debug)]
+#[packed_struct(endian = "msb")]
+pub struct Message31DataBlock {
+    pub block_type: i16,
 }

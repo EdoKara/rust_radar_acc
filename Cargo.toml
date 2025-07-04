@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.98"
 bzip2 = { version = "0.5.2", features = ["libbz2-rs-sys"] }
+packed_struct = { version = "0.10.1", features = ["use_serde"] }
