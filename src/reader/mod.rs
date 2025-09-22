@@ -13,8 +13,13 @@ use crate::messages::{
     ClutterFilterMapMetadata, DigitalRadarDataGenericFormatHeader,
     DigitalRadarDataGenericFormatHeaderRaw, MessageHeader, MessageHeaderRaw,
     RawClutterFilterMapMetadata, VolumeHeader, VolumeHeaderRaw,
-    DIGITAL_RADAR_DATA_GENERIC_FORMAT_HEADER_SIZE,
+    DIGITAL_RADAR_DATA_GENERIC_FORMAT_HEADER_SIZE, HALFWORD_SIZE,
 };
+use crate::reader;
+pub mod decompress_nexrad_file;
+pub mod process_metadata_record;
+pub mod process_regular_record;
+pub mod segment_record;
 
 const MESSAGE_RECORD_SIZE: usize = 2432; // number of bytes in a message segment (compressed)
 const MESSAGE_HEADER_STARTING_BYTE_OFFSET: usize = 12;
@@ -84,65 +89,74 @@ pub fn read_volume_header(fp: &str) -> anyhow::Result<VolumeHeader> {
     Ok(vol_header)
 }
 
-pub fn read_message_header(message: Vec<u8>) -> anyhow::Result<MessageHeader> {
-    let (_, message) = message.split_at(MESSAGE_HEADER_STARTING_BYTE_OFFSET);
-    let (header, _) = message.split_at(MESSAGE_HEADER_SIZE);
+pub fn read_message_headers(message: &Vec<u8>) -> anyhow::Result<Vec<MessageHeader>> {
+    let mut headers: Vec<MessageHeader> = Vec::new();
+    let mut reader = std::io::Cursor::new(message);
+    reader.seek(std::io::SeekFrom::Start(
+        MESSAGE_HEADER_STARTING_BYTE_OFFSET as u64,
+    ))?;
 
-    let mut reader = BufReader::new(header);
+    let message_length = message.len();
+    let mut position_state = reader.position();
 
-    let mut mh = MessageHeaderRaw::new();
+    while position_state < message_length as u64 {
+        println!("Current position: {}", position_state);
+        let mut mh = MessageHeaderRaw::new();
+        reader.read_exact(&mut mh.messagesize)?;
+        reader.read_exact(&mut mh.rda_redundant_channel)?;
+        reader.read_exact(&mut mh.message_type)?;
+        reader.read_exact(&mut mh.id_seq_no)?;
+        reader.read_exact(&mut mh.julian_date)?;
+        reader.read_exact(&mut mh.ms_from_midnight)?;
+        reader.read_exact(&mut mh.n_segments)?;
+        reader.read_exact(&mut mh.message_segment_no)?;
 
-    reader.read_exact(&mut mh.messagesize)?;
-    reader.read_exact(&mut mh.rda_redundant_channel)?;
-    reader.read_exact(&mut mh.message_type)?;
-    reader.read_exact(&mut mh.id_seq_no)?;
-    reader.read_exact(&mut mh.julian_date)?;
-    reader.read_exact(&mut mh.ms_from_midnight)?;
-    reader.read_exact(&mut mh.n_segments)?;
-    reader.read_exact(&mut mh.message_segment_no)?;
+        println!("Message type: {:x?}", &mh.message_type);
+        let message_header = MessageHeader::try_from(mh)
+            .map_err(|e| anyhow::anyhow!("Failed to convert MessageHeaderRaw: {}", e))?;
 
-    let message_header = MessageHeader::try_from(mh)
-        .map_err(|e| anyhow::anyhow!("Failed to convert VolumeHeaderRaw to VolumeHeader: {}", e))?;
-
-    Ok(message_header)
-}
-
-pub fn decompress_nexrad_file(fp: &str) -> anyhow::Result<Vec<Vec<u8>>> {
-    let mut ff: std::fs::File = std::fs::File::open(&fp).expect("Failed to open file");
-    let mut buf: Vec<u8> = Vec::new();
-    let file_length = ff.metadata()?.len();
-
-    let mut position_state: usize = VOLUME_HEADER_SIZE + CONTROL_WORD_SIZE;
-    ff.seek(std::io::SeekFrom::Start(position_state as u64))?;
-
-    let mut bufs: Vec<Vec<u8>> = Vec::new();
-
-    loop {
-        let mut opbuf: Vec<u8> = Vec::new();
-        let mut decoder = bzip2::read::BzDecoder::new(&ff);
-        decoder.read_to_end(&mut opbuf)?;
-
-        bufs.push(opbuf);
-
-        position_state += decoder.total_in() as usize;
-        position_state += CONTROL_WORD_SIZE;
-        ff.seek(std::io::SeekFrom::Start(position_state as u64))?;
-
-        if position_state >= file_length as usize {
-            break;
-        }
+        let update = message_header.messagesize * HALFWORD_SIZE as i16;
+        let update = update as u64;
+        println!("update distance: {}", update);
+        println!("Message size: {}", message_header.messagesize);
+        println!("header: {:?}", message_header);
+        headers.push(message_header);
+        position_state += update;
+        reader.seek_relative(update as i64);
     }
 
-    Ok(bufs)
+    Ok(headers)
+
+    // Skip the first 12 bytes (MESSAGE_HEADER_STARTING_BYTE_OFFSET)
 }
 
-pub fn read_data_header(message: &Vec<u8>) -> anyhow::Result<DigitalRadarDataGenericFormatHeader> {
+pub fn read_generic_data_headers(
+    segment: &Vec<u8>,
+) -> anyhow::Result<Vec<DigitalRadarDataGenericFormatHeader>> {
+    let mut data_headers: Vec<DigitalRadarDataGenericFormatHeader> = Vec::new();
+    let segment_length = segment.len();
+    println!("Segment length: {}", segment_length);
+
+    let starting_offset = MESSAGE_HEADER_STARTING_BYTE_OFFSET + MESSAGE_HEADER_SIZE;
+
+    let mut reader = std::io::Cursor::new(segment.as_slice());
+    let mut position_state = starting_offset;
+    reader.seek(std::io::SeekFrom::Start(position_state as u64))?;
+
+    loop {
+        let mut buf = [0_u8; DIGITAL_RADAR_DATA_GENERIC_FORMAT_HEADER_SIZE];
+        let rvec = reader.read_exact(&mut buf)?;
+        let dhdr = read_data_header(&buf)?;
+    }
+
+    Ok(data_headers)
+}
+
+pub fn read_data_header(message: &[u8]) -> anyhow::Result<DigitalRadarDataGenericFormatHeader> {
     let mut dhdr: DigitalRadarDataGenericFormatHeaderRaw =
         DigitalRadarDataGenericFormatHeaderRaw::default();
 
-    let (_, msg) = message.split_at(MESSAGE_HEADER_STARTING_BYTE_OFFSET + MESSAGE_HEADER_SIZE);
-    let (header, _) = msg.split_at(DIGITAL_RADAR_DATA_GENERIC_FORMAT_HEADER_SIZE);
-    let mut reader = std::io::Cursor::new(header);
+    let mut reader = std::io::Cursor::new(message);
 
     let _ = reader.read_exact(&mut dhdr.radar_identifier);
     let _ = reader.read_exact(&mut dhdr.collection_time);
@@ -178,4 +192,24 @@ pub fn read_data_header(message: &Vec<u8>) -> anyhow::Result<DigitalRadarDataGen
     })?;
 
     Ok(data_header)
+}
+
+pub fn read_message_header(message: Vec<u8>) -> anyhow::Result<MessageHeader> {
+    let mut reader = std::io::Cursor::new(message);
+
+    let mut mh = MessageHeaderRaw::new();
+
+    reader.read_exact(&mut mh.messagesize)?;
+    reader.read_exact(&mut mh.rda_redundant_channel)?;
+    reader.read_exact(&mut mh.message_type)?;
+    reader.read_exact(&mut mh.id_seq_no)?;
+    reader.read_exact(&mut mh.julian_date)?;
+    reader.read_exact(&mut mh.ms_from_midnight)?;
+    reader.read_exact(&mut mh.n_segments)?;
+    reader.read_exact(&mut mh.message_segment_no)?;
+
+    let message_header = MessageHeader::try_from(mh)
+        .map_err(|e| anyhow::anyhow!("Failed to convert VolumeHeaderRaw to VolumeHeader: {}", e))?;
+
+    Ok(message_header)
 }

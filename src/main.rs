@@ -13,12 +13,17 @@ use std::{
 pub mod messages;
 pub mod reader;
 use crate::messages::{
-    ClutterFilterMapMetadata, MessageHeader, MessageHeaderRaw, RawClutterFilterMapMetadata,
-    VolumeHeader, VolumeHeaderRaw, DIGITAL_RADAR_DATA_GENERIC_FORMAT_HEADER_SIZE,
-    MESSAGE_HEADER_SIZE,
+    ClutterFilterMapMetadata, DigitalRadarDataGenericFormat, MessageHeader, MessageHeaderRaw,
+    MetadataBlockType, RawClutterFilterMapMetadata, VolumeHeader, VolumeHeaderRaw,
+    DIGITAL_RADAR_DATA_GENERIC_FORMAT_HEADER_SIZE, MESSAGE_HEADER_SIZE,
 };
+use crate::reader::process_metadata_record::{
+    process_populated_metadata_blocks, segment_metadata_record,
+};
+use crate::reader::process_regular_record::{process_regular_blocks, segment_regular_messages};
 use crate::reader::{
-    decompress_nexrad_file, read_data_header, read_message_header, read_volume_header,
+    decompress_nexrad_file, read_data_header, read_generic_data_headers, read_message_header,
+    read_message_headers, read_volume_header,
 };
 
 const MESSAGE_RECORD_SIZE: usize = 2432; // number of bytes in a message segment (compressed)
@@ -27,28 +32,90 @@ const CONTROL_WORD_SIZE: usize = 4;
 const VOLUME_HEADER_SIZE: usize = 24;
 fn main() -> anyhow::Result<()> {
     let fp = "./data/test";
+    let fp2 = "./data/test2";
 
     let vh = read_volume_header(&fp)?;
 
-    let segments: Vec<Vec<u8>> = decompress_nexrad_file(&fp)?;
+    let segments = decompress_nexrad_file::decompress_nexrad_file(&fp)?;
 
     println!("Volume Header: {:?}", vh);
     println!("Total segments: {}", segments.len());
 
-    let mhdrs: Vec<MessageHeader> = segments
+    segments.iter().enumerate().for_each(|(index, seg)| {
+        println!("{index} Segment type: {:?}", seg.record_type);
+        println!("{index} Segment size: {} bytes", seg.buf.len());
+    });
+
+    let md_segments = segment_metadata_record(segments[0].clone())?;
+    println!("Metadata Record Messages: {}", md_segments.len());
+    println!(
+        "Populated Metadata Record Messages: {}",
+        md_segments
+            .iter()
+            .filter(|msg| msg.blocktype != MetadataBlockType::Empty)
+            .collect::<Vec<_>>()
+            .len()
+    );
+
+    let pop_md_blocks = process_populated_metadata_blocks(md_segments)?;
+    println!("Populated Metadata Messages: {}", pop_md_blocks.len());
+
+    pop_md_blocks.iter().enumerate().for_each(|(index, msg)| {
+        println!("Message {index}: {:?}", msg.header);
+    });
+
+    let reg_segment = segment_regular_messages(segments[1].clone())?;
+    println!("Regular Messages: {}", reg_segment.len());
+
+    reg_segment.iter().enumerate().for_each(|(index, msg)| {
+        println!("Message {index}: {:?}", msg.header);
+    });
+
+    let x = process_regular_blocks(reg_segment)?;
+    println!("Processed Regular Blocks: {}", x.len());
+
+    x.iter().enumerate().for_each(|(index, msg)| {
+        println!("Processed Block {index}: {:?}", msg);
+    });
+
+    let x: Vec<Vec<DigitalRadarDataGenericFormat>> = segments[1..]
+        .to_vec()
         .iter()
-        .map(|seg| read_message_header(seg.clone().to_owned()).unwrap())
+        .map(|seg| segment_regular_messages(seg.to_owned()).unwrap())
+        .map(|msg| process_regular_blocks(msg).unwrap())
         .collect();
 
-    let dhdrs: Vec<_> = segments
-        .iter()
-        .skip(1)
-        .map(|seg| read_data_header(seg).unwrap())
-        .collect();
+    println!("Processed Regular Blocks from all segments: {}", x.len());
 
-    println!("{:?}", dhdrs);
-    println!("total data headers: {:?}", dhdrs.len());
-    println!("dh 1: {:?}", dhdrs.get(0).unwrap());
+    // for (index, mhdr) in mhdrs.iter().enumerate() {
+    //     println!("Message Header {index}: {:?}", mhdr);
+    // }
+    // let tseg = segments[1].clone();
+    // let gdfs = read_generic_data_headers(&tseg)?;
+    // println!("Generic Data Format Header: {:?}", gdfs);
+
+    // let dhdrs: Vec<_> = segments
+    //     .iter()
+    //     .skip(1)
+    //     .enumerate()
+    //     .map(|(i, seg)| {
+    //         println!("{:?}", i);
+    //         read_generic_data_headers(seg).unwrap()
+    //     })
+    //     .collect();
+    // let dhdrs2: Vec<_> = segments2
+    //     .iter()
+    //     .skip(1)
+    //     .map(|seg| read_generic_data_headers(seg).unwrap())
+    //     .collect();
+
+    // for (index, dhdr) in dhdrs.iter().enumerate() {
+    //     println!("Data Header {index}: {:?}", dhdr);
+    // }
+    // for (index, dhdr) in dhdrs2.iter().enumerate() {
+    //     println!("Data Header {index}: {:?}", dhdr);
+    // }
+
     Ok(())
 }
 

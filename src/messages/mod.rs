@@ -5,6 +5,8 @@ pub const HALFWORD_SIZE: usize = 2;
 
 use std::{collections::btree_map::Range, io::Error};
 
+use crate::MESSAGE_RECORD_SIZE;
+
 #[derive(Default, Debug)]
 pub struct VolumeHeaderRaw {
     pub volumename: [u8; 12],
@@ -52,7 +54,7 @@ impl MessageHeaderRaw {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageHeader {
     pub messagesize: i16,
     pub rda_redundant_channel: i8,
@@ -71,7 +73,9 @@ impl TryFrom<MessageHeaderRaw> for MessageHeader {
         Ok(MessageHeader {
             messagesize: i16::from_be_bytes(value.messagesize),
             rda_redundant_channel: i8::from_be_bytes(value.rda_redundant_channel),
-            message_type: collate_message_type(i8::from_be_bytes(value.message_type)).unwrap(),
+            message_type: collate_message_type(i8::from_be_bytes(value.message_type))
+                .map_err(|e| println!("failed to parse message type.\n error:{e}"))
+                .unwrap(),
             id_seq_no: i16::from_be_bytes(value.id_seq_no),
             julian_date: i16::from_be_bytes(value.julian_date),
             ms_from_midnight: i32::from_be_bytes(value.ms_from_midnight),
@@ -81,7 +85,7 @@ impl TryFrom<MessageHeaderRaw> for MessageHeader {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageType {
     DigitalRadarData,
     RDAStatusData,
@@ -309,7 +313,7 @@ impl RangeZone {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct DigitalRadarDataGenericFormatHeader {
     pub radar_identifier: String,
     pub collection_time: i32,
@@ -444,8 +448,368 @@ impl Default for DigitalRadarDataGenericFormatHeaderRaw {
     }
 }
 
-#[derive(PackedStruct, Debug)]
-#[packed_struct(endian = "msb")]
-pub struct Message31DataBlock {
-    pub block_type: i16,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompressedRecord {
+    pub record_type: RecordType,
+    pub buf: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordType {
+    MetadataRecord,
+    NormalRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetadataMessageBlock {
+    pub blocktype: MetadataBlockType,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetadataBlockType {
+    Empty,
+    Populated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetadataMessage {
+    pub header: MessageHeader,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegularMessageBlock {
+    pub header: MessageHeader,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DigitalRadarDataGenericFormat {
+    pub header: DigitalRadarDataGenericFormatHeader,
+    pub data: Vec<u8>,
+    pub volume_constant_data: Option<VolumeConstantData>,
+    pub elevation_constant_data: Option<ElevationConstantData>,
+    pub radial_constant_data: Option<RadialConstantData>,
+    pub moment_blocks: Vec<Option<DigitalRadarDataGenericFormatBlock>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RadialConstantData {
+    pub block_type: BlockType,
+    pub moment_name: DataMoment,
+    pub lrtup: u16,
+    pub unambiguous_range: f32, // scaled SInteger*2
+    pub noise_level_horiz: f32,
+    pub noise_level_vert: f32,
+    pub nyquist_velocity: f32, // scaled SInteger*2
+    spare: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RadialConstantDataRaw {
+    pub block_type: [u8; 1],
+    pub moment_name: [u8; 3],
+    pub lrtup: [u8; 2],
+    pub unambiguous_range: [u8; 2], // scaled SInteger*2
+    pub noise_level_horiz: [u8; 4],
+    pub noise_level_vert: [u8; 4],
+    pub nyquist_velocity: [u8; 2], // scaled SInteger*2
+    spare: Vec<u8>,
+}
+
+impl From<RadialConstantDataRaw> for RadialConstantData {
+    fn from(value: RadialConstantDataRaw) -> Self {
+        let btype: BlockType = match str::from_utf8(&value.block_type).unwrap() {
+            "D" => BlockType::D,
+            "R" => BlockType::R,
+            _ => panic!("Unknown Block type!"),
+        };
+
+        let moment_name: DataMoment = match str::from_utf8(&value.moment_name).unwrap() {
+            "REF" => DataMoment::Reflectivity,
+            "VEL" => DataMoment::Velocity,
+            "SW " => DataMoment::SpectrumWidth,
+            "ZDR" => DataMoment::DifferentialReflectivity,
+            "RHO" => DataMoment::CorrelationCoefficient,
+            "PHI" => DataMoment::DifferentialPhase,
+            "VOL" => DataMoment::Volume,
+            "ELV" => DataMoment::Elevation,
+            "RAD" => DataMoment::Radial,
+            "CFP" => DataMoment::ClutterFilterPowerRemoved,
+            _ => panic!("Unknown moment name! {:x?}", &value.moment_name),
+        };
+
+        println!("Block type: {:x?}", &value.moment_name);
+        println!(
+            "Block type: {:x?}",
+            str::from_utf8(&value.moment_name).unwrap()
+        );
+
+        RadialConstantData {
+            block_type: btype,
+            moment_name,
+            lrtup: u16::from_be_bytes(value.lrtup),
+            unambiguous_range: (i16::from_be_bytes(value.unambiguous_range) as f32)
+                / (10_i16.pow(1) as f32),
+            noise_level_horiz: f32::from_be_bytes(value.noise_level_horiz),
+            noise_level_vert: f32::from_be_bytes(value.noise_level_vert),
+            nyquist_velocity: (i16::from_be_bytes(value.nyquist_velocity) as f32)
+                / (10_i16.pow(2) as f32),
+            spare: value.spare,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ElevationConstantData {
+    pub block_type: BlockType,
+    pub moment_name: DataMoment,
+    pub lrtup: u16,
+    pub atmos_att_factor: f32, // scaled SInteger*2
+    pub calibration_constant: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ElevationConstantDataRaw {
+    pub block_type: [u8; 1],
+    pub moment_name: [u8; 3],
+    pub lrtup: [u8; 2],
+    pub atmos_att_factor: [u8; 2], // scaled SInteger*2
+    pub calibration_constant: [u8; 4],
+}
+
+impl From<ElevationConstantDataRaw> for ElevationConstantData {
+    fn from(value: ElevationConstantDataRaw) -> ElevationConstantData {
+        let btype: BlockType = match str::from_utf8(&value.block_type).unwrap() {
+            "D" => BlockType::D,
+            "R" => BlockType::R,
+            _ => panic!("Unknown Block type!"),
+        };
+
+        println!("Block type: {:x?}", &value.moment_name);
+        println!(
+            "Block type: {:x?}",
+            str::from_utf8(&value.moment_name).unwrap()
+        );
+
+        let moment_name: DataMoment = match str::from_utf8(&value.moment_name).unwrap() {
+            "REF" => DataMoment::Reflectivity,
+            "VEL" => DataMoment::Velocity,
+            "SW " => DataMoment::SpectrumWidth,
+            "ZDR" => DataMoment::DifferentialReflectivity,
+            "RHO" => DataMoment::CorrelationCoefficient,
+            "PHI" => DataMoment::DifferentialPhase,
+            "VOL" => DataMoment::Volume,
+            "ELV" => DataMoment::Elevation,
+            "RAD" => DataMoment::Radial,
+            "CFP" => DataMoment::ClutterFilterPowerRemoved,
+            _ => panic!("Unknown moment name! {:x?}", &value.moment_name),
+        };
+
+        ElevationConstantData {
+            block_type: btype,
+            moment_name,
+            lrtup: u16::from_be_bytes(value.lrtup),
+            atmos_att_factor: (i16::from_be_bytes(value.atmos_att_factor) as f32)
+                / (10_i16.pow(3) as f32),
+            calibration_constant: f32::from_be_bytes(value.calibration_constant),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct VolumeConstantData {
+    pub block_type: BlockType,
+    pub moment_name: DataMoment,
+    pub lrtup: u16,
+    pub version_number: u8,
+    pub version_Number_minor: u8,
+    pub latitude: f32,
+    pub longitude: f32,
+    pub site_height: f32, // SInteger*2
+    pub feedhorn_height: i16,
+    pub calibration_constant: f32,
+    pub horizontal_tx_power: f32,
+    pub verical_tx_power: f32,
+    pub sys_differential_reflectivity: f32,
+    pub initial_differential_phase: f32,
+    pub vcp_number: u16,
+    spare: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct VolumeConstantDataRaw {
+    pub block_type: [u8; 1],
+    pub moment_name: [u8; 3],
+    pub lrtup: [u8; 2],
+    pub version_number: [u8; 1],
+    pub version_Number_minor: [u8; 1],
+    pub latitude: [u8; 4],
+    pub longitude: [u8; 4],
+    pub site_height: [u8; 2], // SInteger*2
+    pub feedhorn_height: [u8; 2],
+    pub calibration_constant: [u8; 4],
+    pub horizontal_tx_power: [u8; 4],
+    pub verical_tx_power: [u8; 4],
+    pub sys_differential_reflectivity: [u8; 4],
+    pub initial_differential_phase: [u8; 4],
+    pub vcp_number: [u8; 2],
+    spare: [u8; 2],
+}
+
+impl From<VolumeConstantDataRaw> for VolumeConstantData {
+    fn from(value: VolumeConstantDataRaw) -> VolumeConstantData {
+        let btype: BlockType = match str::from_utf8(&value.block_type).unwrap() {
+            "D" => BlockType::D,
+            "R" => BlockType::R,
+            _ => panic!("Unknown Block type!"),
+        };
+
+        println!("Block type: {:x?}", &value.moment_name);
+        println!(
+            "Block type: {:x?}",
+            str::from_utf8(&value.moment_name).unwrap()
+        );
+
+        let moment_name: DataMoment = match str::from_utf8(&value.moment_name).unwrap() {
+            "REF" => DataMoment::Reflectivity,
+            "VEL" => DataMoment::Velocity,
+            "SW " => DataMoment::SpectrumWidth,
+            "ZDR" => DataMoment::DifferentialReflectivity,
+            "RHO" => DataMoment::CorrelationCoefficient,
+            "PHI" => DataMoment::DifferentialPhase,
+            "VOL" => DataMoment::Volume,
+            "ELV" => DataMoment::Elevation,
+            "RAD" => DataMoment::Radial,
+            "CFP" => DataMoment::ClutterFilterPowerRemoved,
+            _ => panic!("Unknown moment name! {:x?}", &value.moment_name),
+        };
+
+        VolumeConstantData {
+            block_type: btype,
+            moment_name,
+            lrtup: u16::from_be_bytes(value.lrtup),
+            version_number: value.version_number[0],
+            version_Number_minor: value.version_Number_minor[0],
+            latitude: f32::from_be_bytes(value.latitude),
+            longitude: f32::from_be_bytes(value.longitude),
+            site_height: (i16::from_be_bytes(value.site_height) as f32) / (10_i16.pow(0) as f32),
+            feedhorn_height: i16::from_be_bytes(value.feedhorn_height),
+            calibration_constant: f32::from_be_bytes(value.calibration_constant),
+            horizontal_tx_power: f32::from_be_bytes(value.horizontal_tx_power),
+            verical_tx_power: f32::from_be_bytes(value.verical_tx_power),
+            sys_differential_reflectivity: f32::from_be_bytes(value.sys_differential_reflectivity),
+            initial_differential_phase: f32::from_be_bytes(value.initial_differential_phase),
+            vcp_number: u16::from_be_bytes(value.vcp_number),
+            spare: value.spare.to_vec(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DigitalRadarDataGenericFormatBlock {
+    pub block_type: BlockType,
+    pub moment_name: DataMoment,
+    reserved: Vec<u8>,
+    pub num_moment_gates: i16,
+    pub data_moment_range: f32, // this field is weird, it's a scaled int*2 with a float with three decimal places.
+    pub data_moment_range_sample_interval: f32, // this is also a scaled int*2 with three decimal places.
+    pub threshold_over: f32,                    // this is a scaled int*2 with one decimal place.
+    pub snr_threshold: f32, // this is a scaled signed int*2 as a float with one decimal place.
+    pub control_flags: u8,  // this is a bitfield.
+    pub data_word_size: u8, // this is the size of the data word in bytes.
+    pub scale: f32,
+    pub offset: f32,
+    pub data: Vec<u8>, // this is the actual data for the block.
+}
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DigitalRadarDataGenericFormatBlockRaw {
+    pub block_type: [u8; 1],
+    pub moment_name: [u8; 3],
+    reserved: [u8; 4],
+    pub num_moment_gates: [u8; 2],
+    pub data_moment_range: [u8; 2], // this field is weird, it's a scaled int*2 with a float with three decimal places.
+    pub data_moment_range_sample_interval: [u8; 2], // this is also a scaled int*2 with three decimal places.
+    pub threshold_over: [u8; 2], // this is a scaled int*2 with one decimal place.
+    pub snr_threshold: [u8; 2],  // this is a scaled signed int*2 as a float with one decimal place.
+    pub control_flags: [u8; 1],  // this is a bitfield.
+    pub data_word_size: [u8; 1], // this is the size of the data word in bytes.
+    pub scale: [u8; 4],
+    pub offset: [u8; 4],
+    pub data: Vec<u8>, // this is the actual data for the block.
+}
+
+impl From<DigitalRadarDataGenericFormatBlockRaw> for DigitalRadarDataGenericFormatBlock {
+    fn from(value: DigitalRadarDataGenericFormatBlockRaw) -> DigitalRadarDataGenericFormatBlock {
+        let btype: BlockType = match str::from_utf8(&value.block_type).unwrap() {
+            "D" => BlockType::D,
+            "R" => BlockType::R,
+            _ => panic!("Unknown Block type!"),
+        };
+
+        println!("Block type: {:x?}", &value.moment_name);
+        println!(
+            "Block type: {:x?}",
+            str::from_utf8(&value.moment_name).unwrap()
+        );
+
+        let moment_name: DataMoment = match str::from_utf8(&value.moment_name).unwrap() {
+            "REF" => DataMoment::Reflectivity,
+            "VEL" => DataMoment::Velocity,
+            "SW " => DataMoment::SpectrumWidth,
+            "ZDR" => DataMoment::DifferentialReflectivity,
+            "RHO" => DataMoment::CorrelationCoefficient,
+            "PHI" => DataMoment::DifferentialPhase,
+            "VOL" => DataMoment::Volume,
+            "ELV" => DataMoment::Elevation,
+            "RAD" => DataMoment::Radial,
+            "CFP" => DataMoment::ClutterFilterPowerRemoved,
+            _ => panic!("Unknown moment name! {:x?}", &value.moment_name),
+        };
+
+        DigitalRadarDataGenericFormatBlock {
+            block_type: btype,
+            moment_name,
+            reserved: value.reserved.to_vec(),
+            num_moment_gates: i16::from_be_bytes(value.num_moment_gates),
+            data_moment_range: (i16::from_be_bytes(value.data_moment_range) as f32)
+                / (10_i16.pow(3) as f32),
+            data_moment_range_sample_interval: (i16::from_be_bytes(
+                value.data_moment_range_sample_interval,
+            ) as f32)
+                / (10_i16.pow(3) as f32),
+            threshold_over: (i16::from_be_bytes(value.threshold_over) as f32)
+                / (10_i16.pow(1) as f32),
+            snr_threshold: (i16::from_be_bytes(value.snr_threshold) as f32)
+                / (10_i16.pow(1) as f32),
+            control_flags: value.control_flags[0],
+            data_word_size: value.data_word_size[0],
+            scale: f32::from_be_bytes(value.scale),
+            offset: f32::from_be_bytes(value.offset),
+            data: value.data,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum BlockType {
+    R,
+    #[default]
+    D,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum DataMoment {
+    #[default]
+    Reflectivity,
+    Velocity,
+    SpectrumWidth,
+    DifferentialReflectivity,
+    CorrelationCoefficient,
+    DifferentialPhase,
+    Volume,
+    Elevation,
+    Radial,
+    ClutterFilterPowerRemoved,
 }
